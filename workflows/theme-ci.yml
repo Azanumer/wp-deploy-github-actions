@@ -1,0 +1,58 @@
+# CI for a WordPress theme or plugin.
+#
+# Copy this file to .github/workflows/theme-ci.yml in your theme/plugin repo.
+#
+# Flow:
+#   1. PHP syntax check on every *.php (excluding vendor/)
+#   2. PHPCS with the WordPress standard — only when a phpcs.xml config exists
+#   3. On main: build a release zip (excludes .git, node_modules, vendor)
+#      and upload it as a workflow artifact
+
+name: Theme CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: composer
+
+      - name: PHP syntax check
+        run: |
+          fail=0
+          while IFS= read -r -d '' f; do
+            php -l "$f" >/dev/null || fail=1
+          done < <(find . -name '*.php' -not -path './vendor/*' -print0)
+          exit $fail
+
+      - name: PHPCS (if configured)
+        run: |
+          if [ -f phpcs.xml ] || [ -f phpcs.xml.dist ]; then
+            composer global require "squizlabs/php_codesniffer=*"
+            ~/.composer/vendor/bin/phpcs --standard=WordPress .
+          else
+            echo "No phpcs config found, skipping."
+          fi
+
+      - name: Build release zip
+        if: github.ref == 'refs/heads/main'
+        run: |
+          slug="${GITHUB_REPOSITORY##*/}"
+          zip -r "${slug}.zip" . -x '*/.git/*' '*/node_modules/*' '*/vendor/*' '*.zip'
+
+      - name: Upload artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-zip
+          path: "*.zip"
